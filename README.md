@@ -1,4 +1,4 @@
-# Breakable Flask
+# VULN-FLASK-APP
 
 
 A simple vulnerable Flask application.
