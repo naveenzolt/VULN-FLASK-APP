@@ -20,6 +20,8 @@ import sys
 
 from flask import Flask, request, make_response, render_template_string
 
+import db_config
+
 # Config stuff
 KEY=Random.new().read(32) # 256 bit key for extra security!!!
 BLOCKSIZE=AES.block_size
@@ -311,6 +313,9 @@ def index():
         <a href="/sayhi">Receive a personalised greeting</a><br>
         <a href="/listservices">List our products and services</a><br>
         <a href="/user">Log on using a jwt</a><br>
+        <a href="/admin/search">Admin: search products</a><br>
+        <a href="/admin/logs">Admin: view logs</a><br>
+        <a href="/admin/backup">Admin: download backup</a><br>
     </body>
     </html>
     """
@@ -572,6 +577,89 @@ def login():
     return make_response(form)
 
 
+# 9. Admin: search products and services
+@app.route('/admin/search', methods = ['POST', 'GET'])
+def admin_search():
+    results_html = ''
+    term = None
+    if request.method == 'POST':
+        term = request.form['term']
+    elif 'term' in request.args:
+        term = request.args['term']
+
+    if term:
+        query = "SELECT name, description FROM public_stuff WHERE name LIKE '%{}%' OR description LIKE '%{}%'".format(term, term)
+        try:
+            cursor.execute(query_build(query))
+            results = cursor.fetchall()
+        except Exception as e:
+            return 'Search error: ' + str(e)
+        results_html = ''.join(['<li><b>{}</b> - {}</li>'.format(a[0], a[1]) for a in results])
+
+    return """
+    <html>
+       <body>
+          <h2>Admin product search</h2>
+          <form action = "/admin/search" method = "POST">
+             <p><input type = 'text' name = 'term'/></p>
+             <p><input type = 'submit' value = 'Search'/></p>
+          </form>
+          <ul>""" + results_html + """</ul>
+       </body>
+    </html>
+    """
+
+
+# 10. Admin: log file viewer
+@app.route('/admin/logs', methods = ['GET'])
+def admin_logs():
+    logfile = request.args.get('file', 'app.log')
+    base_dir = os.path.join(os.getcwd(), 'logs')
+    path = os.path.join(base_dir, logfile)
+
+    try:
+        with open(path, 'r') as f:
+            content = f.read()
+    except FileNotFoundError:
+        content = 'Log file %s not found, available files: <a href="/admin/logs?file=app.log">app.log</a>, <a href="/admin/logs?file=access.log">access.log</a>' % logfile
+
+    return """
+    <html>
+       <body>
+          <h2>Log viewer: """ + logfile + """</h2>
+          <pre>""" + content + """</pre>
+       </body>
+    </html>
+    """
+
+
+# 11. Admin: download a database backup
+@app.route('/admin/backup', methods = ['POST', 'GET'])
+def admin_backup():
+    message = None
+    if request.method == 'POST':
+        filename = request.form.get('filename', 'backup')
+        fmt = request.form.get('format', 'sql')
+        command = 'mysqldump -u {} -p{} -h {} breakdb --result-file=/tmp/{}.{}'.format(
+            db_config.DATABASE_USER, db_config.DATABASE_PASSWORD, db_config.DATABASE_HOST, filename, fmt)
+        output = rp(command)
+        message = 'Backup written to /tmp/{}.{} <br> {}'.format(filename, fmt, output)
+
+    return """
+    <html>
+       <body>
+          <h2>Database backup</h2>
+          <form action = "/admin/backup" method = "POST">
+             <p>Filename: <input type = 'text' name = 'filename' value = 'backup'/></p>
+             <p>Format: <input type = 'text' name = 'format' value = 'sql'/></p>
+             <p><input type = 'submit' value = 'Create backup'/></p>
+          </form>
+          """ + (message if message else '') + """
+       </body>
+    </html>
+    """
+
+
 
 
 if __name__ == "__main__":
@@ -658,4 +746,4 @@ if __name__ == "__main__":
         print('An error ocured during database connection/setup: {}'.format(e))
         sys.exit(1)
     
-    app.run(host=args.address, port=args.port)
+    app.run(host=args.address, port=args.port, debug=True)
